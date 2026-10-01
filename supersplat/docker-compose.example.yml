@@ -2,18 +2,20 @@
 #   <owner>          GitHub-gebruiker of -organisatie waar het image staat (kleine letters)
 #   <poort>          poort op de server waarop SuperSplat bereikbaar wordt
 #   <splats-map>     map op de server met de scene-mappen
+#   <certs-map>      map op de server waar het self-signed certificaat bewaard wordt
 #
-# Openen:  http://<server>:<poort>/
+# Openen:  https://<server>:<poort>/   (eenmalig de certificaatwaarschuwing wegklikken)
 # Splat direct laden:
-#   http://<server>:<poort>/?load=/splats/<scene>/lfs-output/<bestand>.ply
+#   https://<server>:<poort>/?load=/splats/<scene>/lfs-output/<bestand>.ply
 
 services:
   supersplat:
     image: ghcr.io/<owner>/supersplat:latest
     container_name: supersplat
     ports:
-      - "<poort>:80"
+      - "<poort>:443"
     volumes:
       - <splats-map>:/splats:ro
+      - <certs-map>:/certs
     mem_limit: 256m
     restart: unless-stopped
