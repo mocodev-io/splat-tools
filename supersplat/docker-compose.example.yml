@@ -1,0 +1,19 @@
+# Voorbeeld - vervang de <placeholders> door je eigen waarden.
+#   <owner>          GitHub-gebruiker of -organisatie waar het image staat (kleine letters)
+#   <poort>          poort op de server waarop SuperSplat bereikbaar wordt
+#   <splats-map>     map op de server met de scene-mappen
+#
+# Openen:  http://<server>:<poort>/
+# Splat direct laden:
+#   http://<server>:<poort>/?load=/splats/<scene>/lfs-output/<bestand>.ply
+
+services:
+  supersplat:
+    image: ghcr.io/<owner>/supersplat:latest
+    container_name: supersplat
+    ports:
+      - "<poort>:80"
+    volumes:
+      - <splats-map>:/splats:ro
+    mem_limit: 256m
+    restart: unless-stopped
