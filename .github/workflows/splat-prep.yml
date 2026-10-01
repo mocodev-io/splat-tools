@@ -1,0 +1,106 @@
+name: Build splat-prep image
+
+# Handmatig starten, of elke maandag automatisch checken op een nieuwe COLMAP-release.
+# Bestaat het image voor de nieuwste release al, dan wordt er niets gebouwd.
+# Na een wijziging aan frames.py of de Dockerfile: handmatig starten met "force".
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Opnieuw bouwen, ook als deze versie al bestaat"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "57 4 * * 1"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Nieuwste COLMAP-release en image-naam bepalen
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # COLMAP publiceert ook datasets/modellen als release; alleen versienummers tellen
+          TAG=$(gh release list --repo colmap/colmap --exclude-drafts --exclude-pre-releases \
+                  --limit 50 --json tagName -q '.[].tagName' \
+                | grep -E '^v?[0-9]+(\.[0-9]+){1,2}$' | sort -V | tail -n 1)
+          test -n "${TAG}" || { echo "Geen COLMAP-release gevonden" >&2; exit 1; }
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${OWNER}/splat-prep"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Nieuwste COLMAP-release: ${TAG}"
+
+      - name: Log in bij GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bestaat deze versie al?
+        id: check
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect "${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+            echo "Image voor ${{ steps.version.outputs.tag }} bestaat al, niets te doen."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Code ophalen
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/checkout@v4
+
+      - name: COLMAP-broncode ophalen
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: colmap/colmap
+          ref: ${{ steps.version.outputs.tag }}
+          path: colmap-src
+
+      - name: Schijfruimte vrijmaken
+        if: steps.check.outputs.skip == 'false'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # Stap 1: COLMAP bouwen met zijn eigen officiele Dockerfile (alleen lokaal)
+      - name: COLMAP bouwen
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          docker build \
+            -f colmap-src/docker/Dockerfile \
+            --target runtime \
+            -t colmap-base:local \
+            colmap-src
+
+      # Stap 2: splat-prep bovenop COLMAP bouwen en pushen
+      - name: splat-prep bouwen en pushen
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          IMAGE="${{ steps.version.outputs.image }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          docker build \
+            --build-arg BASE_IMAGE=colmap-base:local \
+            -t "${IMAGE}:${TAG}" \
+            -t "${IMAGE}:latest" \
+            splat-prep
+          docker push "${IMAGE}:${TAG}"
+          docker push "${IMAGE}:latest"
