@@ -1,0 +1,24 @@
+# Voorbeeld - vervang de <placeholders> door je eigen waarden.
+#   <owner>          GitHub-gebruiker of -organisatie waar het image staat (kleine letters)
+#   <splats-map>     map op de server met de scene-mappen
+#
+# De container doet niets tot je er een commando in uitvoert:
+#   docker exec splat-prep frames /workspace/<scene>
+#   docker exec splat-prep colmap-run /workspace/<scene>
+#
+# NVIDIA_DRIVER_CAPABILITIES: compute = CUDA (COLMAP), video = NVDEC (frames decoderen)
+
+services:
+  splat-prep:
+    image: ghcr.io/<owner>/splat-prep:latest
+    container_name: splat-prep
+    network_mode: none
+    mem_limit: 4g
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+    volumes:
+      - <splats-map>:/workspace
+    restart: "no"
+    command: ["sleep", "infinity"]
