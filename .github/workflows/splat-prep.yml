@@ -2,7 +2,7 @@ name: Build splat-prep image
 
 # Handmatig starten, of elke maandag automatisch checken op een nieuwe COLMAP-release.
 # Bestaat het image voor de nieuwste release al, dan wordt er niets gebouwd.
-# Na een wijziging aan frames.py of de Dockerfile: handmatig starten met "force".
+# Na een wijziging aan een script of de Dockerfile: handmatig starten met "force".
 on:
   workflow_dispatch:
     inputs:
@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
   packages: write
+
+env:
+  # GPU-architecturen: 75 = RTX 20xx, 86 = RTX 30xx, 89 = RTX 40xx.
+  # Caspar vereist een expliciete lijst (>= 70).
+  CUDA_ARCHITECTURES: "75;86;89"
 
 jobs:
   build:
@@ -81,15 +86,32 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Stap 1: COLMAP bouwen met zijn eigen officiele Dockerfile (alleen lokaal)
+      # Fix: Caspar (GPU bundle adjustment) aanzetten in COLMAP's officiele
+      # Dockerfile. De architectuurlijst wordt tussen aanhalingstekens gezet,
+      # anders splitst de shell hem op de puntkomma's.
+      - name: COLMAP-Dockerfile aanpassen (Caspar aan)
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          F=colmap-src/docker/Dockerfile
+          sed -i 's|-DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}|-DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" -DCASPAR_ENABLED=ON|' "$F"
+          grep -q 'CASPAR_ENABLED=ON' "$F" || { echo "Patch niet toegepast: COLMAP-Dockerfile is veranderd" >&2; exit 1; }
+          grep -n 'CASPAR_ENABLED' "$F"
+
+      # Stap 1: COLMAP bouwen met zijn eigen (aangepaste) Dockerfile, alleen lokaal
       - name: COLMAP bouwen
         if: steps.check.outputs.skip == 'false'
         run: |
           docker build \
             -f colmap-src/docker/Dockerfile \
             --target runtime \
+            --build-arg CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
             -t colmap-base:local \
             colmap-src
+
+      # Modellen ophalen die bij deze COLMAP-versie horen (met controlesom)
+      - name: Modellen ophalen
+        if: steps.check.outputs.skip == 'false'
+        run: python3 splat-prep/fetch_models.py colmap-src splat-prep/models
 
       # Stap 2: splat-prep bovenop COLMAP bouwen en pushen
       - name: splat-prep bouwen en pushen
