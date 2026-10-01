@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Frames uit video halen voor Gaussian splatting.
 
-Gebruik:  frames <scene-map> [--fps N]
+Gebruik:  frames <scene-map> [--fps N] [--hdr]
 
 Verwacht in de scene-map een map input/ met een of meer video's.
 Stappen:
   1. ffmpeg haalt frames uit op 2x de doel-fps (standaard 6 fps).
+     Met --hdr wordt HDR-video (HLG/PQ, bijvoorbeeld van een iPhone) eerst
+     omgezet naar normaal SDR-beeld, anders worden de frames flets.
   2. Van elk frame wordt de scherpte gemeten (variantie van de Laplaciaan).
   3. Per groepje van 2 opeenvolgende frames blijft het scherpste over
      (standaard dus 3 fps).
@@ -29,6 +31,13 @@ OVERSAMPLE = 2            # frames uithalen op OVERSAMPLE x doel-fps
 MEASURE_WIDTH = 1024      # scherpte meten op een verkleinde versie
 BLURRY_FACTOR = 0.5       # behouden frame < 50% van de mediaan = onscherp
 
+# HDR (HLG/PQ) naar SDR (bt709) met tonemapping
+HDR_TO_SDR = (
+    "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+    "tonemap=tonemap=hable:desat=0,"
+    "zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+)
+
 
 def fail(msg):
     print(f"Fout: {msg}", file=sys.stderr)
@@ -48,13 +57,16 @@ def sharpness(path):
     return float(lap.var())
 
 
-def extract(video, out_dir, fps):
+def extract(video, out_dir, fps, hdr):
     """Frames uit een video halen als JPG van hoge kwaliteit."""
     out_dir.mkdir(parents=True)
+    vf = f"fps={fps}"
+    if hdr:
+        vf += "," + HDR_TO_SDR
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-stats",
         "-i", str(video),
-        "-vf", f"fps={fps}",
+        "-vf", vf,
         "-qscale:v", "2",
         str(out_dir / "%06d.jpg"),
     ]
@@ -68,6 +80,8 @@ def main():
     p.add_argument("scene", type=Path, help="scene-map met input/")
     p.add_argument("--fps", type=float, default=3.0,
                    help="aantal behouden frames per seconde (standaard 3)")
+    p.add_argument("--hdr", action="store_true",
+                   help="HDR-video (HLG/PQ) omzetten naar SDR")
     args = p.parse_args()
 
     if args.fps <= 0:
@@ -99,8 +113,9 @@ def main():
 
     try:
         for vi, video in enumerate(videos, 1):
-            print(f"[{vi}/{len(videos)}] {video.name}: frames uithalen op {extract_fps:g} fps")
-            frames = extract(video, tmp_dir / f"v{vi}", extract_fps)
+            mode = ", HDR naar SDR" if args.hdr else ""
+            print(f"[{vi}/{len(videos)}] {video.name}: frames uithalen op {extract_fps:g} fps{mode}")
+            frames = extract(video, tmp_dir / f"v{vi}", extract_fps, args.hdr)
             if not frames:
                 print(f"  geen frames uit {video.name}, overgeslagen")
                 continue
