@@ -1,4 +1,4 @@
-# splat-prep - frames uit video halen (en later COLMAP) voor Gaussian splatting.
+# splat-prep - frames uit video halen en COLMAP draaien voor Gaussian splatting.
 # Basis: COLMAP, gebouwd uit de officiele broncode met COLMAP's eigen Dockerfile
 # (https://github.com/colmap/colmap/tree/main/docker). De workflow bouwt die eerst
 # lokaal voor de nieuwste release en geeft hem hier mee via BASE_IMAGE.
@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY frames.py /usr/local/bin/frames
-RUN chmod +x /usr/local/bin/frames
+COPY colmap-run.py /usr/local/bin/colmap-run
+RUN chmod +x /usr/local/bin/frames /usr/local/bin/colmap-run
 
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
