@@ -18,11 +18,16 @@ versie opnieuw te bouwen. Images komen in GHCR met de releaseversie en `latest` 
 SuperSplat (de splat-editor van PlayCanvas) als statische site in een kleine
 nginx-container. Het renderen gebeurt in de browser, de container heeft geen GPU nodig.
 
+SuperSplat heeft WebGPU nodig, en browsers geven dat alleen vrij op HTTPS (of
+`localhost`). De container serveert daarom via HTTPS met een self-signed certificaat.
+Dat wordt bij de eerste start aangemaakt in `/certs`; mount die map als volume, dan
+blijft het bewaard en klik je de certificaatwaarschuwing maar één keer per browser weg.
+
 De splats-map wordt alleen-lezen gemount en geserveerd onder `/splats/`, zodat een
 splat direct te openen is:
 
 ```
-http://<server>:<poort>/?load=/splats/<scene>/lfs-output/<bestand>.ply
+https://<server>:<poort>/?load=/splats/<scene>/lfs-output/<bestand>.ply
 ```
 
 Bewerkingen sla je op via de browser (exporteren/downloaden); de container schrijft
@@ -33,16 +38,17 @@ Zie `supersplat/docker-compose.example.yml`.
 ## splat-prep
 
 Gebouwd op COLMAP (met CUDA). De workflow bouwt eerst COLMAP's eigen officiële
-Dockerfile voor de nieuwste release en zet daar ffmpeg, Python en het `frames`-script
-bovenop. Het image-label is de COLMAP-versie.
+Dockerfile voor de nieuwste release en zet daar ffmpeg, Python en de scripts `frames`
+en `colmap-run` bovenop. Het image-label is de COLMAP-versie.
 
 ### Mapindeling per scene
 
 ```
 <scene>/
   input/        video('s)
-  images/       uitgehaalde frames
-  sparse/       COLMAP-resultaat (later)
+  images/       uitgehaalde frames          (frames)
+  database.db   COLMAP-database             (colmap-run)
+  sparse/0/     camera-posities             (colmap-run)
   lfs-output/   trainingsresultaat
 ```
 
@@ -53,9 +59,12 @@ bovenop. Het image-label is de COLMAP-versie.
 ```
 docker exec splat-prep frames /workspace/<scene>
 docker exec splat-prep frames /workspace/<scene> --fps 2
+docker exec splat-prep frames /workspace/<scene> --hdr
 ```
 
-1. Haalt frames uit op 2× de doel-fps (standaard 6 fps).
+1. Haalt frames uit op 2× de doel-fps (standaard 6 fps). Met `--hdr` wordt HDR-video
+   (HLG/PQ, bijvoorbeeld van een iPhone) omgezet naar SDR; zonder die optie worden
+   HDR-frames flets en grauw.
 2. Meet van elk frame de scherpte (variantie van de Laplaciaan).
 3. Houdt per groepje van 2 opeenvolgende frames het scherpste (standaard 3 fps).
 4. Zet de behouden frames als JPG van hoge kwaliteit in `images/`
@@ -65,16 +74,42 @@ docker exec splat-prep frames /workspace/<scene> --fps 2
    zijn dan de rest (minder dan 50% van de mediaan). Die blijven in `images/` staan;
    verwijder ze zelf als je wilt.
 
-Meerdere video's in `input/` worden op naam gesorteerd en doorlopend genummerd.
-Is `images/` niet leeg, dan stopt het script; leeg de map eerst.
+Video's moeten direct in `input/` staan (geen submappen). Meerdere video's worden op
+naam gesorteerd en doorlopend genummerd. Is `images/` niet leeg, dan stopt het
+script; leeg de map eerst.
 
-Zie `splat-prep/docker-compose.example.yml`. De container start met
-`sleep infinity` en doet niets tot je er een commando in uitvoert.
+### colmap-run
 
-### Na een wijziging aan het script
+```
+docker exec splat-prep colmap-run /workspace/<scene>
+```
+
+1. `feature_extractor` op `images/` (GPU): één gedeelde camera met model `OPENCV`,
+   zodat de lensvervorming wordt meegeschat.
+2. `sequential_matcher` (GPU): vergelijkt frames met hun buren, past bij video.
+3. `global_mapper`: reconstructie, resultaat in `sparse/0/`.
+4. Overzicht: hoeveel frames een camera-positie hebben gekregen.
+
+Undistorten is niet nodig: LichtFeld leest het `OPENCV`-model direct, dus `images/` en
+`sparse/0/` kunnen meteen naar LichtFeld. Gebruik per scene één camera. Is `sparse/`
+niet leeg, dan stopt het script; een oude `database.db` wordt opnieuw aangemaakt.
+
+### Voortgang in de containerlog
+
+De container start met `sleep infinity` en doet niets tot je er een commando in
+uitvoert. Wil je een commando op de achtergrond draaien en via de containerlog volgen:
+
+```
+docker exec -d splat-prep sh -c 'frames /workspace/<scene> > /proc/1/fd/1 2>&1'
+```
+
+Zie `splat-prep/docker-compose.example.yml`.
+
+### Na een wijziging aan een script
 
 De wekelijkse check bouwt alleen bij een nieuwe COLMAP-release. Na een wijziging aan
-`frames.py` of de Dockerfile: start de workflow handmatig met **force** aangevinkt.
+`frames.py`, `colmap-run.py` of de Dockerfile: start de workflow handmatig met
+**force** aangevinkt.
 
 ## Licenties
 
